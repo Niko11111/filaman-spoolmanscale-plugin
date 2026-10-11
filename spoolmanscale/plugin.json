@@ -1,0 +1,12 @@
+{
+  "plugin_key": "spoolmanscale",
+  "name": "SpoolmanScale",
+  "plugin_type": "integration",
+  "version": "0.1.1",
+  "description": "Shows the web interface of a SpoolmanScale inside FilaMan, with its own entry in the navigation. The scale's address is taken from FilaMan's device list, so nothing has to be typed in. Needs SpoolmanScale firmware 0.8.3 or newer with FilaMan as its backend.",
+  "author": "Niko11111",
+  "homepage": "https://github.com/Niko11111/filaman-spoolmanscale-plugin",
+  "license": "MIT",
+  "page_url": "/plugin-page/spoolmanscale",
+  "show_in_nav": true
+}

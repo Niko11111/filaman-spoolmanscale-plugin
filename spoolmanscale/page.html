@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>FilaMan - SpoolmanScale</title>
+  <link rel="icon" type="image/png" href="/favicon.png" />
+  <script>
+    // Adopt the theme the user picked in FilaMan itself, before first paint.
+    document.documentElement.setAttribute('data-theme', localStorage.getItem('theme') || 'brand');
+  </script>
+  <style>
+    /* FilaMan draws the page ground around this frame, so only text and the
+       few controls take colours here, one set per FilaMan theme. The
+       color-scheme has to match the one FilaMan sets for the same theme:
+       where a frame's scheme differs from its parent's, Chrome lays an
+       opaque white canvas under it. */
+    html[data-theme="brand"], html[data-theme="dark"] { color-scheme: dark; }
+    html[data-theme="light"] { color-scheme: light; }
+    html[data-theme="brand"] { --text: #e9f3ec; --muted: #b5c7bd; --accent: #4ee3a2; --line: rgba(255,255,255,0.12); --chip: rgba(255,255,255,0.06); }
+    html[data-theme="light"] { --text: #1a231e; --muted: #53645a; --accent: #1c9b6b; --line: rgba(26,35,30,0.16); --chip: rgba(26,35,30,0.05); }
+    html[data-theme="dark"]  { --text: #eef1f7; --muted: #9aa4b7; --accent: #73d1ff; --line: rgba(255,255,255,0.12); --chip: rgba(255,255,255,0.06); }
+
+    html, body { height: 100%; margin: 0; }
+    body {
+      display: flex; flex-direction: column; gap: 10px;
+      background: transparent; color: var(--text);
+      font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    }
+    .bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+    .bar[hidden], .msg[hidden], iframe[hidden] { display: none; }
+    .bar button {
+      font: inherit; color: var(--text); background: var(--chip);
+      border: 1px solid var(--line); border-radius: 999px; padding: 4px 14px; cursor: pointer;
+    }
+    .bar button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+    .bar a { margin-left: auto; color: var(--accent); text-decoration: none; }
+    .bar a:hover { text-decoration: underline; }
+    .msg { margin: auto; max-width: 460px; padding: 24px; text-align: center; }
+    .msg h2 { margin: 0 0 8px; font-size: 18px; font-weight: 600; }
+    .msg p { margin: 0; color: var(--muted); }
+    iframe { flex: 1; width: 100%; border: 0; border-radius: 12px; background: transparent; }
+  </style>
+</head>
+<body>
+  <div class="bar" id="bar" hidden>
+    <span id="choices"></span>
+    <a id="own-tab" target="_blank" rel="noopener"></a>
+  </div>
+  <div class="msg" id="msg">
+    <h2 id="msg-title"></h2>
+    <p id="msg-text"></p>
+  </div>
+  <iframe id="scale" title="SpoolmanScale" hidden></iframe>
+
+  <script>
+    (function () {
+      var STRINGS = {
+        en: {
+          searching: 'Looking for your scale',
+          searchingText: 'Asking FilaMan which devices are online.',
+          none: 'No SpoolmanScale online',
+          noneText: 'The scale needs FilaMan as its backend and has to be connected to it. It reports its address once a minute, so a scale that just started shows up here shortly.',
+          error: 'Device list not available',
+          errorText: 'FilaMan did not answer the request for its devices. Trying again shortly.',
+          https: 'Open FilaMan over http to see the scale here',
+          httpsText: 'FilaMan is open over https and the scale only speaks http, so the browser will not show it inside this page. The link above opens the scale in its own tab.',
+          ownTab: 'Open in own tab'
+        },
+        de: {
+          searching: 'Suche deine Waage',
+          searchingText: 'FilaMan wird gefragt, welche Geräte online sind.',
+          none: 'Keine SpoolmanScale online',
+          noneText: 'Die Waage braucht FilaMan als Backend und muss mit ihm verbunden sein. Sie meldet ihre Adresse einmal pro Minute, eine gerade gestartete Waage erscheint also gleich hier.',
+          error: 'Geräteliste nicht verfügbar',
+          errorText: 'FilaMan hat die Anfrage nach seinen Geräten nicht beantwortet. Gleich kommt ein neuer Versuch.',
+          https: 'FilaMan über http öffnen, um die Waage hier zu sehen',
+          httpsText: 'FilaMan ist über https geöffnet und die Waage spricht nur http, deshalb zeigt der Browser sie nicht in dieser Seite. Der Link oben öffnet die Waage in einem eigenen Tab.',
+          ownTab: 'Im eigenen Tab öffnen'
+        }
+      };
+      var S = STRINGS[(localStorage.getItem('lang') || 'en').slice(0, 2)] || STRINGS.en;
+
+      // FilaMan keeps a device in its active list for three minutes after its
+      // last heartbeat, and the scale sends one a minute: asking again every
+      // 20 s finds a scale that just came up without hammering the server.
+      var RETRY_MS = 20000;
+      // The address FilaMan stored is whatever the device reported, so it is
+      // checked before it becomes a URL: a host name or IPv4, optional port.
+      var HOST_PATTERN = /^[A-Za-z0-9.-]+(:[0-9]{1,5})?$/;
+      var CHOICE_KEY = 'spoolmanscale.device';
+      // A page from https may not frame one from http, the browser blocks it.
+      var CAN_FRAME = location.protocol === 'http:';
+
+      var bar = document.getElementById('bar');
+      var choices = document.getElementById('choices');
+      var ownTab = document.getElementById('own-tab');
+      var msg = document.getElementById('msg');
+      var frame = document.getElementById('scale');
+      var shownOrigin = null;
+      ownTab.textContent = S.ownTab;
+
+      function themeMode() {
+        return localStorage.getItem('theme') === 'light' ? 'light' : 'dark';
+      }
+
+      // The scale's pages take light or dark from their parent, only from it,
+      // and only from a parent its frame-ancestors header allows.
+      function sendTheme() {
+        if (!shownOrigin || !frame.contentWindow) return;
+        frame.contentWindow.postMessage({ type: 'spoolmanscale:theme', mode: themeMode() }, shownOrigin);
+      }
+
+      function showMessage(key) {
+        document.getElementById('msg-title').textContent = S[key];
+        document.getElementById('msg-text').textContent = S[key + 'Text'];
+        msg.hidden = false;
+        frame.hidden = true;
+      }
+
+      function scaleOrigin(device) {
+        var host = String(device.ip_address || '');
+        return HOST_PATTERN.test(host) ? 'http://' + host : null;
+      }
+
+      function select(device, buttons) {
+        var origin = scaleOrigin(device);
+        ownTab.href = origin + '/';
+        buttons.forEach(function (b) { b.setAttribute('aria-pressed', String(b.deviceId === device.id)); });
+        try { localStorage.setItem(CHOICE_KEY, String(device.id)); } catch (e) { /* private mode */ }
+        if (!CAN_FRAME) { showMessage('https'); return; }
+        if (shownOrigin === origin) return;
+        shownOrigin = origin;
+        frame.src = origin + '/';
+        msg.hidden = true;
+        frame.hidden = false;
+      }
+
+      function render(devices) {
+        var stored = localStorage.getItem(CHOICE_KEY);
+        var buttons = devices.map(function (device) {
+          var b = document.createElement('button');
+          b.type = 'button';
+          b.textContent = device.name || scaleOrigin(device);
+          b.deviceId = device.id;
+          b.addEventListener('click', function () { select(device, buttons); });
+          return b;
+        });
+        choices.replaceChildren.apply(choices, devices.length > 1 ? buttons : []);
+        bar.hidden = false;
+        var chosen = devices.filter(function (d) { return String(d.id) === stored; })[0] || devices[0];
+        select(chosen, buttons);
+      }
+
+      function load() {
+        fetch('/api/v1/devices/active', { credentials: 'include', cache: 'no-store' })
+          .then(function (r) {
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            return r.json();
+          })
+          .then(function (list) {
+            var devices = (Array.isArray(list) ? list : []).filter(scaleOrigin);
+            if (!devices.length) {
+              showMessage('none');
+              setTimeout(load, RETRY_MS);
+              return;
+            }
+            render(devices);
+          })
+          .catch(function (err) {
+            console.warn('SpoolmanScale plugin: device list request failed', err);
+            showMessage('error');
+            setTimeout(load, RETRY_MS);
+          });
+      }
+
+      // Every page the scale loads in the frame starts on its own palette
+      // and is told again; a theme switch in FilaMan reaches this page as a
+      // storage event, because the shell around it writes localStorage.
+      frame.addEventListener('load', sendTheme);
+      window.addEventListener('storage', function (e) {
+        if (e.key !== 'theme') return;
+        document.documentElement.setAttribute('data-theme', e.newValue || 'brand');
+        sendTheme();
+      });
+
+      showMessage('searching');
+      load();
+    })();
+  </script>
+</body>
+</html>
