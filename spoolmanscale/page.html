@@ -77,6 +77,17 @@
           https: 'FilaMan über http öffnen, um die Waage hier zu sehen',
           httpsText: 'FilaMan ist über https geöffnet und die Waage spricht nur http, deshalb zeigt der Browser sie nicht in dieser Seite. Der Link oben öffnet die Waage in einem eigenen Tab.',
           ownTab: 'Im eigenen Tab öffnen'
+        },
+        fr: {
+          searching: 'Recherche de votre balance',
+          searchingText: 'FilaMan est interrogé sur les appareils en ligne.',
+          none: 'Aucune SpoolmanScale en ligne',
+          noneText: 'La balance doit utiliser FilaMan comme backend et y être connectée. Elle transmet son adresse une fois par minute : une balance qui vient de démarrer apparaît donc ici sous peu.',
+          error: 'Liste des appareils indisponible',
+          errorText: 'FilaMan n’a pas répondu à la demande de la liste de ses appareils. Nouvel essai dans un instant.',
+          https: 'Ouvrez FilaMan en http pour voir la balance ici',
+          httpsText: 'FilaMan est ouvert en https et la balance ne parle que http : le navigateur refuse donc de l’afficher dans cette page. Le lien ci-dessus ouvre la balance dans un onglet séparé.',
+          ownTab: 'Ouvrir dans un onglet séparé'
         }
       };
       var S = STRINGS[(localStorage.getItem('lang') || 'en').slice(0, 2)] || STRINGS.en;
